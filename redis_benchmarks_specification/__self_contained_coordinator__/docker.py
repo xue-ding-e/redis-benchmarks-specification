@@ -872,10 +872,15 @@ def spin_docker_cluster_redis(
             raise RuntimeError(
                 "Cluster did not reach 'ok' state within {}s".format(timeout)
             )
-        cluster_info = first.execute_command("CLUSTER", "INFO")
-        if isinstance(cluster_info, bytes):
-            cluster_info = cluster_info.decode()
-        if "cluster_state:ok" in cluster_info:
+        # Each node has its own view; node 0 can be ready before its peers.
+        all_nodes_ready = True
+        for conn in cluster_conns:
+            cluster_info = conn.execute_command("CLUSTER", "INFO")
+            if isinstance(cluster_info, bytes):
+                cluster_info = cluster_info.decode()
+            if "cluster_state:ok" not in cluster_info:
+                all_nodes_ready = False
+        if all_nodes_ready:
             logging.info(
                 "Cluster is ready (cluster_state:ok) after {:.1f}s".format(elapsed)
             )
