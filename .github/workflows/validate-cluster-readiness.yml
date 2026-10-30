@@ -1,0 +1,59 @@
+name: Candidate cluster readiness validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cluster-readiness-validation
+  cancel-in-progress: false
+jobs:
+  integration:
+    if: github.repository == 'xue-ding-e/redis-benchmarks-specification'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TOX_DOCKER_GATEWAY: localhost
+      CANDIDATE_SHA: 81d16e96d0bc75cceac401f7c42dbca6240dda16
+    steps:
+      - name: Check out fixed candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: xue-ding-e/redis-benchmarks-specification
+          ref: 81d16e96d0bc75cceac401f7c42dbca6240dda16
+          persist-credentials: false
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Prepare integration environment
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          docker version
+          python -m pip install -U setuptools wheel
+          python -m pip install -r dev_requirements.txt
+          tox --version
+          python --version
+      - name: Run complete native integration suite
+        timeout-minutes: 42
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=30s 40m tox -e integration-tests 2>&1 | tee integration.log
+      - name: Save validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cluster-readiness-81d16e9
+          path: |
+            integration.log
+            coverage.xml
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Clean dedicated hosted runner containers
+        if: always()
+        timeout-minutes: 2
+        run: |
+          # This job uses a fresh GitHub-hosted VM, never a shared/self-hosted runner.
+          docker ps -aq | xargs -r docker rm -f
+          docker network prune --force
